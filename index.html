@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pembaca Al-Qur'an — Simple Quran Reader</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.1/css/all.min.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .arab { font-family: "Noto Naskh Arabic", "Scheherazade New", serif; font-size: 1.45rem; line-height: 1.6; direction: rtl; }
+    .scroll-y { overflow-y: auto; max-height: 56vh; }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-white via-emerald-50 to-emerald-100 text-gray-800">
+
+<!-- Navbar/Header -->
+<header class="sticky top-0 z-40 bg-white/80 backdrop-blur-sm shadow-sm">
+  <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
+    <div>
+      <h1 class="text-lg font-bold text-emerald-700">Quran Reader</h1>
+    </div>
+
+    <div class="ml-auto flex items-center gap-3">
+      <input id="search" type="search" placeholder="Cari surat (nama / latin / nomor)..."
+             class="px-3 py-2 border rounded-full text-sm w-40 md:w-80 focus:outline-emerald-300" />
+      <button id="btn-home" title="Daftar Surat" class="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm">Daftar</button>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-4 py-6">
+  <!-- two-pane layout on desktop: left = daftar surat, right = content/detail -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- Sidebar: daftar surat -->
+    <aside class="lg:col-span-1">
+      <div class="bg-white rounded-2xl shadow p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold text-emerald-700">Daftar Surat</h2>
+          <div class="text-sm text-gray-500">API</div>
+        </div>
+
+        <div class="space-y-3">
+          <div class="flex gap-2">
+            <button id="refreshBtn" class="flex-1 text-sm px-3 py-2 rounded-lg bg-emerald-100 text-emerald-700">Muat Ulang</button>
+            <button id="markAllRead" title="Tandai semua terbaca" class="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm">Tandai Semua</button>
+          </div>
+
+          <div id="surahList" class="space-y-2 scroll-y p-1">
+            <!-- daftar surat akan di-render di sini -->
+            <div class="text-center text-sm text-gray-400 py-6">Memuat daftar surat...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 bg-white rounded-2xl shadow p-4 text-sm">
+        <div class="font-semibold mb-2">Petunjuk</div>
+        <ul class="list-disc pl-5 space-y-1 text-gray-600">
+          <li>Klik nama surat untuk melihat ayatnya.</li>
+          <li>Gunakan tombol ▶ untuk memutar audio surah.</li>
+          <li>Tandai ayat terbaca — disimpan di perangkatmu.</li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- Content / detail area -->
+    <section class="lg:col-span-2 space-y-4">
+      <!-- Surah header + audio controls -->
+      <div id="surahHeader" class="bg-white rounded-2xl shadow p-4 hidden">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div>
+            <div class="flex items-center gap-3">
+              <div class="bg-emerald-100 text-emerald-800 rounded-xl px-3 py-2 font-semibold" id="surahNo">1</div>
+              <div>
+                <div class="text-lg font-bold" id="surahNameArab">—</div>
+                <div class="text-sm text-gray-600" id="surahNameLatin">—</div>
+              </div>
+            </div>
+            <div class="mt-2 text-sm text-gray-600" id="surahMeta">—</div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <audio id="surahAudio" preload="metadata"></audio>
+
+            <button id="playBtn" class="flex items-center gap-2 bg-emerald-600 text-white px-3 py-2 rounded-lg">
+              <span id="playLabel"></span>
+            </button>
+
+            <button id="toggleReadMode" class="px-3 py-2 rounded-lg border text-sm">Tampilkan Terbaca</button>
+          </div>
+        </div>
+
+        <div class="mt-3 text-sm text-gray-700" id="surahDesc"></div>
+      </div>
+
+      <!-- Ayat list (visible saat ada surah) -->
+      <div id="ayatArea" class="hidden">
+        <div id="ayatList" class="space-y-3">
+          <!-- each ayat card -->
+        </div>
+      </div>
+
+      <!-- placeholder home content -->
+      <div id="homeCard" class="bg-white rounded-2xl shadow p-6">
+        <h2 class="text-xl font-bold text-emerald-700 mb-2">Selamat datang</h2>
+        <p class="text-gray-600">Pilih surat di sisi kiri untuk mulai membaca. Aplikasi ini memanfaatkan <span class="font-mono text-xs text-gray-700">quran-api.santrikoding.com</span>.</p>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- small footer -->
+<footer class="max-w-6xl mx-auto px-4 py-6 text-center text-xs text-gray-500">
+  Dibuat dengan ❤️ · Data dari quran-api.santrikoding.com
+</footer>
+
+<script>
+  // ------------------------
+  // Config & State
+  // ------------------------
+  const API_BASE = 'https://quran-api.santrikoding.com/api';
+  const surahListEl = document.getElementById('surahList');
+  const surahHeader = document.getElementById('surahHeader');
+  const surahAudio = document.getElementById('surahAudio');
+  const playBtn = document.getElementById('playBtn');
+  const playLabel = document.getElementById('playLabel');
+  const ayatArea = document.getElementById('ayatArea');
+  const ayatList = document.getElementById('ayatList');
+  const homeCard = document.getElementById('homeCard');
+  const searchInput = document.getElementById('search');
+  const refreshBtn = document.getElementById('refreshBtn');
+  const markAllBtn = document.getElementById('markAllRead');
+  const btnHome = document.getElementById('btn-home');
+  const surahNoEl = document.getElementById('surahNo');
+  const surahNameArab = document.getElementById('surahNameArab');
+  const surahNameLatin = document.getElementById('surahNameLatin');
+  const surahMeta = document.getElementById('surahMeta');
+  const surahDesc = document.getElementById('surahDesc');
+  const toggleReadModeBtn = document.getElementById('toggleReadMode');
+
+  // localStorage keys
+  const LS_SURAH = 'qreader-surah-list-v1';
+  const LS_READ = 'qreader-read-v1';
+
+  // in-memory state
+  let SURAH = []; // daftar surah
+  let currentSurah = null;
+  let readMap = JSON.parse(localStorage.getItem(LS_READ) || '{}'); // { "surah-1": [1,2], ... }
+  let showOnlyRead = false;
+
+  // ------------------------
+  // Utilities
+  // ------------------------
+  function setLoadingList() {
+    surahListEl.innerHTML = '<div class="text-center text-sm text-gray-400 py-6">Memuat daftar surat...</div>';
+  }
+
+  function formatMeta(s) {
+    return `${s.jumlah_ayat} ayat • ${capitalize(s.tempat_turun)} • arti: ${s.arti}`;
+  }
+
+  function capitalize(str='') {
+    if (!str) return '';
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
+
+  function saveReadMap() {
+    localStorage.setItem(LS_READ, JSON.stringify(readMap));
+  }
+
+  function markAyatRead(surahNo, ayatNo, read=true) {
+    const key = `s-${surahNo}`;
+    if (!readMap[key]) readMap[key] = [];
+    const exists = readMap[key].includes(ayatNo);
+    if (read && !exists) readMap[key].push(ayatNo);
+    if (!read && exists) readMap[key] = readMap[key].filter(n => n !== ayatNo);
+    saveReadMap();
+    renderAyatList(); // refresh
+    renderSurahList(); // update badges
+  }
+
+  function isAyatRead(surahNo, ayatNo) {
+    const key = `s-${surahNo}`;
+    return Array.isArray(readMap[key]) && readMap[key].includes(ayatNo);
+  }
+
+  function markAllInSurah(surahNo) {
+    const key = `s-${surahNo}`;
+    if (!currentSurah || currentSurah.nomor !== surahNo) return;
+    readMap[key] = currentSurah.ayat.map(a => a.nomor);
+    saveReadMap();
+    renderAyatList();
+    renderSurahList();
+  }
+
+  // ------------------------
+  // Fetch daftar surat
+  // ------------------------
+  async function loadSurahList(force=false) {
+    setLoadingList();
+    try {
+      if (!force) {
+        const cached = localStorage.getItem(LS_SURAH);
+        if (cached) {
+          SURAH = JSON.parse(cached);
+          renderSurahList();
+          // continue to refresh in background
+        }
+      }
+      const res = await fetch(`${API_BASE}/surah`);
+      if (!res.ok) throw new Error('Gagal memuat API');
+      const data = await res.json();
+      SURAH = data;
+      localStorage.setItem(LS_SURAH, JSON.stringify(SURAH));
+      renderSurahList();
+    } catch (err) {
+      surahListEl.innerHTML = `<div class="text-center text-sm text-red-500 py-6">Gagal memuat daftar surat. Coba tekan "Muat Ulang".</div>`;
+      console.error(err);
+    }
+  }
+
+  // ------------------------
+  // Render daftar surat (sidebar)
+  // ------------------------
+  function renderSurahList(filter='') {
+    const q = filter.trim().toLowerCase();
+    if (!SURAH || SURAH.length === 0) {
+      setLoadingList();
+      return;
+    }
+    const list = SURAH.filter(s => {
+      if (!q) return true;
+      return (s.nama_latin + ' ' + s.nama + ' ' + s.nomor).toLowerCase().includes(q);
+    });
+
+    surahListEl.innerHTML = '';
+    list.forEach(s => {
+      const key = `s-${s.nomor}`;
+      const readCount = (readMap[key] || []).length;
+      const card = document.createElement('button');
+      card.className = 'w-full text-left p-3 rounded-xl hover:bg-emerald-50 flex items-center justify-between';
+      card.innerHTML = `
+        <div>
+          <div class="text-sm font-semibold">${s.nomor}. ${s.nama_latin}</div>
+          <div class="text-xs text-gray-500">${s.nama} • ${s.jumlah_ayat} ayat</div>
+        </div>
+        <div class="flex flex-col items-end">
+          <div class="text-xs ${readCount? 'text-emerald-600 font-semibold' : 'text-gray-400'}">${readCount}/${s.jumlah_ayat}</div>
+          <div class="text-xs text-gray-400">${capitalize(s.tempat_turun)}</div>
+        </div>
+      `;
+      card.addEventListener('click', () => openSurah(s.nomor));
+      surahListEl.appendChild(card);
+    });
+
+    if (list.length === 0) {
+      surahListEl.innerHTML = '<div class="text-center text-sm text-gray-400 py-6">Tidak ada hasil.</div>';
+    }
+  }
+
+  // ------------------------
+  // Open surah detail
+  // ------------------------
+  async function openSurah(nomor) {
+    try {
+      showHome(false);
+      ayatList.innerHTML = '';
+      surahHeader.classList.add('hidden');
+      ayatArea.classList.add('hidden');
+
+      const res = await fetch(`${API_BASE}/surah/${nomor}`);
+      if (!res.ok) throw new Error('Gagal memuat detail surah');
+      const data = await res.json();
+      if (!data || !data.status) throw new Error('Data tidak valid');
+
+      currentSurah = data;
+      surahNoEl.textContent = data.nomor;
+      surahNameArab.innerHTML = data.nama;
+      surahNameLatin.textContent = `${data.nama_latin} • arti: ${data.arti}`;
+      surahMeta.textContent = formatMeta(data);
+      // description may contain HTML
+      surahDesc.innerHTML = data.deskripsi || '';
+
+      // audio
+      if (data.audio) {
+        surahAudio.src = data.audio;
+        surahAudio.currentTime = 0;
+        playLabel.className = 'fa fa-play';
+        playBtn.disabled = false;
+      } else {
+        surahAudio.removeAttribute('src');
+        playBtn.disabled = true;
+        playLabel.textContent = 'Audio tidak tersedia';
+      }
+
+      // render ayat
+      renderAyatList(data.ayat || []);
+      surahHeader.classList.remove('hidden');
+      ayatArea.classList.remove('hidden');
+      // scroll to top of content on mobile
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      alert('Gagal memuat surah. Periksa koneksi internet.');
+      console.error(err);
+    }
+  }
+
+  // ------------------------
+  // Render ayat list
+  // ------------------------
+  function renderAyatList(list = currentSurah ? currentSurah.ayat : []) {
+    ayatList.innerHTML = '';
+    if (!list || list.length === 0) {
+      ayatList.innerHTML = '<div class="text-center text-gray-400 py-8">Tidak ada ayat.</div>';
+      return;
+    }
+
+    // optionally filter to show only read/only unread
+    const filtered = list.filter(a => {
+      if (showOnlyRead) return isAyatRead(currentSurah.nomor, a.nomor);
+      return true;
+    });
+
+    filtered.forEach(a => {
+      const read = isAyatRead(currentSurah.nomor, a.nomor);
+      const card = document.createElement('div');
+      card.className = 'bg-white p-4 rounded-2xl shadow flex flex-col md:flex-row gap-4 md:gap-6';
+      card.innerHTML = `
+        <div class="w-full md:w-20 flex-shrink-0 flex flex-col items-center justify-start">
+          <div class="text-sm text-emerald-700 font-semibold mb-2">${a.nomor}</div>
+          <button data-ayat="${a.nomor}" class="toggle-read text-xs ${read? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700'} px-3 py-1 rounded-full">${read? 'Terbaca' : 'Tandai'}</button>
+        </div>
+        <div class="flex-1">
+          <div class="arab text-2xl md:text-3xl">${a.ar}</div>
+          <div class="mt-2 text-sm text-gray-700"><em>${a.tr || ''}</em></div>
+          <div class="mt-2 text-sm text-gray-600">${a.idn || ''}</div>
+        </div>
+      `;
+      // event listener toggle read
+      card.querySelectorAll('.toggle-read').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const ayNo = Number(btn.getAttribute('data-ayat'));
+          markAyatRead(currentSurah.nomor, ayNo, !isAyatRead(currentSurah.nomor, ayNo));
+        });
+      });
+
+      ayatList.appendChild(card);
+    });
+
+    if (filtered.length === 0) {
+      ayatList.innerHTML = '<div class="text-center text-gray-400 py-6">Tidak ada ayat yang ditandai.</div>';
+    }
+  }
+
+  // ------------------------
+  // Audio controls
+  // ------------------------
+  playBtn.addEventListener('click', () => {
+    if (!surahAudio.src) return;
+    if (surahAudio.paused) {
+      surahAudio.play().then(() => playLabel.className = 'fa fa-pause').catch(()=>{});
+    } else {
+      surahAudio.pause();
+      playLabel.className = 'fa fa-play';
+    }
+  });
+  surahAudio.addEventListener('ended', ()=> playLabel.className = 'fa fa-play');
+  surahAudio.addEventListener('pause', ()=> playLabel.className = 'fa fa-play');
+  surahAudio.addEventListener('play', ()=> playLabel.className = 'fa fa-pause');
+
+  // ------------------------
+  // Search & UI interactions
+  // ------------------------
+  searchInput.addEventListener('input', (e) => {
+    renderSurahList(e.target.value);
+  });
+  refreshBtn.addEventListener('click', ()=> loadSurahList(true));
+  btnHome.addEventListener('click', ()=> showHome(true));
+  markAllBtn.addEventListener('click', () => {
+    // mark all read across all surahs: ask confirm
+    if (!confirm('Tandai semua ayat di semua surat sebagai terbaca?')) return;
+    SURAH.forEach(s => {
+      readMap[`s-${s.nomor}`] = Array.from({length: s.jumlah_ayat}, (_,i) => i+1);
+    });
+    saveReadMap();
+    renderSurahList();
+    renderAyatList();
+    alert('Semua ayat ditandai terbaca.');
+  });
+
+  toggleReadModeBtn.addEventListener('click', () => {
+    showOnlyRead = !showOnlyRead;
+    toggleReadModeBtn.textContent = showOnlyRead ? 'Tampilkan Semua' : 'Tampilkan Terbaca';
+    renderAyatList();
+  });
+
+  // helper to show/hide home vs detail
+  function showHome(show=true) {
+    if (show) {
+      homeCard.classList.remove('hidden');
+      surahHeader.classList.add('hidden');
+      ayatArea.classList.add('hidden');
+    } else {
+      homeCard.classList.add('hidden');
+    }
+  }
+
+  // ------------------------
+  // Initialize
+  // ------------------------
+  (function init() {
+    setLoadingList();
+    loadSurahList(false);
+    showHome(true);
+  })();
+</script>
+</body>
+</html>
